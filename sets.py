@@ -2,7 +2,6 @@ import time, vision, util
 from camera import Camera
 import random
 import cv2
-from random import Random
 import serial
 # height loc (row) / width loc (column)
 #ROI = [(0,216,575,912,1250)(0,216,575,912,1250)(0,216,575,912,1250)]
@@ -20,15 +19,18 @@ class SetGame(object):
                             [[58,58,148],[94,189,177]], \
                             [[113,51,131],[153,193,200]]]
     self.grayThresholds = [155,255]
+    # break up the image into regions for each card
     self.rois = util.createCardROIs(3,5,self.ymin,self.ymax,self.xmin,self.xmax)
     self.stillPlaying = True
     self.cam = Camera(1)
     self.classifier = vision.CardClassifier()
+    # get all the possible sets
     util.readAllSets()
     self.rng = random.Random(15)
     print "Ready to play!! :)"
-    #self.robotController = serial.Serial("/dev/ttyUSB1",115200)
-    self.robotController = serial.Serial("/dev/tty",115200)
+    # connect to the robot
+    self.robotController = serial.Serial("/dev/ttyUSB0",115200)
+    #self.robotController = serial.Serial("/dev/tty",115200)
 
   def play(self):
     cards = []
@@ -37,13 +39,16 @@ class SetGame(object):
       shouldUpdate = raw_input("should update the image? [y]/n")
       if shouldUpdate == "y" or shouldUpdate == "":
         img = self.cam.getImage()
+        # update the image of the cards in play
         newCards = self.updateBoardModel(img)
+      # with these cards, find any sets
       sets = util.findSets(newCards)
       if len(sets) > 1:
         val = self.rng.randint(0,len(sets)-1)
-        pickUp(sets[val])
+        # pick up the set of cards
+        self.pickUp(sets[val])
       elif len(sets) == 1:
-        pickUp(sets[0])
+        self.pickUp(sets[0])
       time.sleep(1)
       #ret = raw_input("keep playing [y]/n: ")
       #if ret == 'n':
@@ -52,42 +57,56 @@ class SetGame(object):
   def pickUp(self, cards):
     finishingPickUp = True
     while finishingPickUp:
-      val = r.random()
-      if val > .6:
-        finishingPickUp = False
-        outString = ""
-        outString += str(currentSet[0])
-        outString += ","
-        outString += str(currentSet[1])
-        outString += ","
-        outString += str(currentSet[2])
-        print outString
-        robotController.reset_output_buffer()
-        time.sleep(.2)
-        robotController.write(outString)
-        time.sleep(1)
-        print "waiting for robot to respond"
-        robotController.reset_input_buffer()
-        time.sleep(1)
-        while True:
-          x = robotController.readline()
-          try:
-            y = x.strip()
-            print "response", y
-            if y == "pic" or y == "pic\n" or y =="pic \n" or y == "pic ":
-              print "ready to go to the next round"
-              break
-          except AttributeError:
-            pass
+      val = self.rng.random()
+      if val > .8:
+        if len(cards) > 1:
+          finishingPickUp = False
+          outString = ""
+          outString += str(cards[0])
+          outString += ","
+          outString += str(cards[1])
+          outString += ","
+          outString += str(cards[2])
+          print outString
+          self.robotController.reset_output_buffer()
+          time.sleep(.2)
+          self.robotController.write(outString)
           time.sleep(1)
+          print "waiting for robot to respond"
+          #self.robotController.reset_input_buffer()
+          #time.sleep(1)
+          #self.robotController.reset_input_buffer()
+          #time.sleep(1)
+          while True:
+            # wait for the robot to respond
+            # doesn't fully work when the human tries to pick up a set
+            x = self.robotController.readline()
+            try:
+              y = x.strip()
+              print "response ", y
+              if y == "pic" or y == "pic\n" or y =="pic \n" or y == "pic ":
+                print "ready to go to the next round"
+                break
+              elif y == "picB" or y == "picB " or y == "picB\n":
+                cards = []
+                print "waiting for human to finish"
+                finishingPickUp = False
+                break
+              else:
+                print "interesting"
+
+            except AttributeError:
+              pass
+            time.sleep(2)
       else:
-        time.sleep(1)
+        time.sleep(2)
 
   def updateBoardModel(self,img):
     #print "updating card classification"
     cards = []
     for roi in self.rois:
       try:
+        # find the value for each card
         cards.append(self.classifier.classifyCard(img[roi[0]:roi[1],roi[2]:roi[3]], self.colorThresholds, self.grayThresholds))
       except AttributeError:
         cards.append(-1111)
@@ -103,7 +122,7 @@ class SetGame(object):
 
   def createTrainingShapes(self):
     img  = self.cam.getImage()
-    for roi in self.rois[:10]:
+    for roi in self.rois[:14]:
       try:
         self.classifier.createTrainingShapes(img[roi[0]:roi[1],roi[2]:roi[3]], self.grayThresholds)
       except AttributeError:

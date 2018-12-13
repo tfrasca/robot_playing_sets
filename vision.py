@@ -7,15 +7,20 @@ import imutils
 
 shapes = [0,0]
 
+# classify the cards
 class CardClassifier(object):
   def __init__(self, **kwargs):
     self.trainingShapes = []
+
+  # get the contours on the cards which are on the second hierarchical layer
+  # this filters out noise and returns only the contours for the elements on the card
   def getCardContours(self,img, imgOG):
     cards = []
     minAreaThresh = 1500
     maxAreaThresh = 8000
     cardMinThresh = 23000
     cardMaxThresh = 33000
+    # get contours
     img, contours, hierarchy = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     try:
       hierarchy = hierarchy[0]
@@ -23,16 +28,23 @@ class CardClassifier(object):
       print "no contours found"
       return []
     index = 0
+    # find the areas for each contour
     contourAreas = self.getContourAreas(contours)
     elems = []
+    # evaluate the hierarchical level of the contour
+    # contours [next contour on same level, previous, first child, parent]
     for contLevel in hierarchy:
+      # if there is no parent, then it is on the top level
       if contLevel[3] == -1:
         contourArea = contourAreas[index]
+        # only keep the cards on the top level if area is within threshold
         if contourArea > cardMinThresh and contourArea < cardMaxThresh:
           hasChild = True
           nextChild = contLevel[2]
+          # check to see if this card has any children
           if nextChild == -1:
             hasChild = False
+          # find all the children contours
           while hasChild:
             child = hierarchy[nextChild]
             contour = contours[nextChild]
@@ -62,9 +74,9 @@ class CardClassifier(object):
       cy = int(mom['m01']/mom['m00'])
       i2 = cv2.drawContours(img,[contour],-1,(255,0,255),3)
       cv2.circle(img,(cx,cy),5,(0,255,255),3)
-      #print cy,cx
       pix = img[cy,cx]
-      #print pix
+      # very naive color checking
+      # find the center and evaluate the rgb values
       if pix[2] > 150:
         color = "red"
         colors[0] = colors[0] + 1
@@ -74,7 +86,7 @@ class CardClassifier(object):
       else:
         color = "purple"
         colors[2] = colors[2] + 1
-      print color
+      #print color
       #util.show(img)
     #print colors
     if colors[0] > colors[1]:
@@ -87,52 +99,50 @@ class CardClassifier(object):
       return 3
 
   def modEdges(self,edges):
+    # this method does nothing need to change the kernel size if it should work
     kernel = np.ones((1,1),np.uint8)
-    #e0 = edges.copy()
-    #e0 = cv2.erode(e0,kernel, iterations = 1)
-    #e1 = cv2.dilate(e0,kernel, iterations =2)
     e2 = edges.copy()
     e2 = cv2.dilate(e2,kernel, iterations = 1)
     e3 = cv2.erode(e2,kernel, iterations =1)
     return e3
 
-  def classifyColor(self,img, colorThresholds):
-    index = 0
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    util.show(hsv)
-    for colorThresh in colorThresholds:
-      minHSV = np.array(colorThresh[0])
-      maxHSV = np.array(colorThresh[1])
-      colorImg = cv2.inRange(hsv, minHSV, maxHSV)
-      util.show(colorImg)
-      imgout, contours, hierarchy = cv2.findContours(colorImg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-      try:
-        #print "trying"
-        for contour in contours:
-          #print "contour"
-          cv2.drawContours(colorImg, [contour], -1, (0,255,255),3)
-          #x,y,w,h = cv2.boundingRec(contour)
-          #cv2.rectangle(colorImg,(x,y),(x+w,y+h),(0,255,0),2)
-          util.show(colorImg)
-        contourAreas = self.getContourAreas(contours)
-        contourAreas.sort()
-        contourAreas.reverse()
-        if len(contourAreas) >0:
-          #print "there are contours for this color"
-          if contourAreas[0] > 750:
-            return index
-      except TypeError:
-        print "passing"
-        pass
-      index += 1
+  #def classifyColor(self,img, colorThresholds):
+  #  index = 0
+  #  hsv = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+  #  util.show(hsv)
+  #  for colorThresh in colorThresholds:
+  #    minHSV = np.array(colorThresh[0])
+  #    maxHSV = np.array(colorThresh[1])
+  #    colorImg = cv2.inRange(hsv, minHSV, maxHSV)
+  #    util.show(colorImg)
+  #    imgout, contours, hierarchy = cv2.findContours(colorImg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+  #    try:
+  #      #print "trying"
+  #      for contour in contours:
+  #        #print "contour"
+  #        cv2.drawContours(colorImg, [contour], -1, (0,255,255),3)
+  #        #x,y,w,h = cv2.boundingRec(contour)
+  #        #cv2.rectangle(colorImg,(x,y),(x+w,y+h),(0,255,0),2)
+  #        util.show(colorImg)
+  #      contourAreas = self.getContourAreas(contours)
+  #      contourAreas.sort()
+  #      contourAreas.reverse()
+  #      if len(contourAreas) >0:
+  #        #print "there are contours for this color"
+  #        if contourAreas[0] > 750:
+  #          return index
+  #    except TypeError:
+  #      #print "passing"
+  #      pass
+  #    index += 1
 
 
+  # simple nearest neighbor classifier
   def nn(self,contours,k):
   # shape, contour
     similarities = []
     shapeClass = [0,0,0]
     for contour in contours:
-
       for shape in self.trainingShapes:
         similar = cv2.matchShapes(contour,shape[1], 2, 0.0)
         similarities.append([similar,shape[0]])
@@ -154,6 +164,7 @@ class CardClassifier(object):
         return 2
       return 3
 
+  #create the training samples for nearest neighbors
   def createTrainingShapes(self, img, grayThresh):
     imgog = img.copy()
     imgG  = cv2.cvtColor(imgog, cv2.COLOR_BGR2GRAY)
@@ -161,7 +172,12 @@ class CardClassifier(object):
     imgMod = self.modEdges(imgG)
     contours = self.getCardContours(imgMod,img)
     util.show(img)
-    shape = raw_input("shape")
+    waitForShape = True
+    while waitForShape:
+      shape = raw_input("shape: ")
+      print shape
+      if not shape == "":
+        waitForShape= False
     for contour in contours:
       a = raw_input("add shape? [y]/n")
       if a =="y" or a =="":
@@ -186,7 +202,7 @@ class CardClassifier(object):
     shape += len(contours)*10
     #print "shape,number",shape
     shape += self.detectColor(contours, img)
-    print "shape,number, color",shape
+    #print "shape,number, color",shape
     #util.show(img)
     #act_shape = raw_input("what is color/fill ")
     #if act_shape == "":
@@ -198,5 +214,5 @@ class CardClassifier(object):
     #    shape += int(act_shape)
     #  except ValueError:
     #    return shape
-    print "code ",shape
+    #print "code ",shape
     return shape

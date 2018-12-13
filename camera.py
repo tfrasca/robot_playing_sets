@@ -1,6 +1,5 @@
 import cv2
 
-CAM = 0
 
 class Camera(object):
 
